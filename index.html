@@ -141,9 +141,26 @@
         <button id="remove-point">Remove point</button>
         <button id="adjust-point" style="grid-column: span 2">Adjust handles</button>
       </div>
+      
+      <div id="point-mode-container" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid #1f2937;">
+        <h3 style="margin: 0 0 8px; font-size: 12px; color: #94a3b8; text-transform: uppercase;">Point Mode</h3>
+        <div class="controls">
+           <button id="mode-broken" class="mode-btn">Broken</button>
+           <button id="mode-smooth" class="mode-btn">Smooth</button>
+        </div>
+      </div>
+
       <div style="display: flex; align-items: center; gap: 8px; margin-top: 10px;">
         <input type="checkbox" id="toggle-closed" />
         <label for="toggle-closed" style="font-size: 13px; color: #cbd5e1; cursor: pointer;">Close path</label>
+      </div>
+
+      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #1f2937;">
+        <label for="point-size" style="font-size: 13px; color: #cbd5e1;">Point Size</label>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+          <input type="range" id="point-size" min="0" max="20" value="14" style="flex: 1;" />
+          <span id="point-size-value" style="font-size: 12px; color: #94a3b8; width: 24px;">14</span>
+        </div>
       </div>
     </div>
 
