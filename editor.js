@@ -484,7 +484,10 @@ function saveCurveData() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'curve-data.json';
+  
+  const name = state.imageName ? state.imageName.replace(/\.[^/.]+$/, "") : 'curve-data';
+  link.download = `${name}.json`;
+  
   link.click();
   URL.revokeObjectURL(url);
 }
