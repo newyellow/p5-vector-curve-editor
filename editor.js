@@ -10,6 +10,9 @@ const state = {
   transform: { scale: 1, offset: { x: 0, y: 0 } },
   resolution: { width: 960, height: 720 },
   pointSize: 14,
+  isPanning: false,
+  lastMouse: { x: 0, y: 0 },
+  defaultPointMode: 'smooth',
 };
 
 function setup() {
@@ -140,6 +143,13 @@ function drawOverlay() {
 
 function mousePressed() {
   if (!mouseInCanvas()) return;
+  state.lastMouse = { x: mouseX, y: mouseY };
+
+  // Middle mouse or Ctrl + Click for panning
+  if (mouseButton === CENTER || (keyIsDown(CONTROL) && mouseButton === LEFT)) {
+    state.isPanning = true;
+    return;
+  }
 
   if (state.mode === 'add') {
     const worldPos = screenToWorld(mouseX, mouseY);
@@ -154,11 +164,26 @@ function mousePressed() {
   } else if (state.mode === 'adjust') {
     state.selected = hitTest(mouseX, mouseY);
     updatePointModeUI();
+    
+    // If we clicked on nothing in adjust mode, start panning
+    if (!state.selected) {
+        state.isPanning = true;
+    }
   }
 }
 
 function mouseDragged() {
   if (!mouseInCanvas()) return;
+
+  if (state.isPanning) {
+    const dx = mouseX - state.lastMouse.x;
+    const dy = mouseY - state.lastMouse.y;
+    state.transform.offset.x += dx;
+    state.transform.offset.y += dy;
+    state.lastMouse = { x: mouseX, y: mouseY };
+    return;
+  }
+
   if (!state.selected || state.mode !== 'adjust') return;
 
   const { index, type } = state.selected;
@@ -207,11 +232,39 @@ function mouseDragged() {
       pt.inHandle.y = pt.position.y + dy;
     }
   }
+  
+  state.lastMouse = { x: mouseX, y: mouseY };
 }
 
 function mouseReleased() {
+  state.isPanning = false;
   // Don't deselect immediately to allow UI interaction
   // state.selected = null; 
+}
+
+function mouseWheel(event) {
+  if (!mouseInCanvas()) return;
+  
+  const zoomFactor = 0.1;
+  const zoomIn = event.delta < 0;
+  const newScale = zoomIn ? state.transform.scale * (1 + zoomFactor) : state.transform.scale / (1 + zoomFactor);
+  
+  // Limit min/max zoom
+  if (newScale < 0.05 || newScale > 20) return;
+  
+  // Zoom towards mouse
+  const worldMouse = screenToWorld(mouseX, mouseY);
+  
+  state.transform.scale = newScale;
+  
+  // Calculate new offset to keep worldMouse at mouseX, mouseY
+  // screenX = worldX * scale + offsetX
+  // offsetX = screenX - worldX * scale
+  state.transform.offset.x = mouseX - worldMouse.x * newScale;
+  state.transform.offset.y = mouseY - worldMouse.y * newScale;
+  
+  // Prevent default scrolling behavior
+  return false;
 }
 
 function mouseInCanvas() {
@@ -239,14 +292,54 @@ function addPoint(x, y) {
         
         inHandle = { x: x - nx * handleLen, y: y - ny * handleLen };
         outHandle = { x: x + nx * handleLen, y: y + ny * handleLen };
+        
+        // Also adjust the previous point's outHandle to point towards the new point
+        // This creates a smooth flow coming INTO the new segment
+        // Only do this if the previous point is also in 'smooth' mode or if we want to force valid tangents
+        
+        // Use defaultPointMode to decide if we strictly enforce smooth on the previous point
+        // Logic: 
+        // 1. We ALWAYS adjust prev.outHandle to point to the new location (to make the segment nice)
+        // 2. BUT, we only rotate prev.inHandle (affecting previous segment) if prev.mode is 'smooth'
+        
+        prev.outHandle.x = prev.position.x + nx * handleLen;
+        prev.outHandle.y = prev.position.y + ny * handleLen;
+        
+        if (prev.mode === 'smooth') {
+             const pdx = prev.position.x - prev.outHandle.x;
+             const pdy = prev.position.y - prev.outHandle.y;
+             // Keep the original length of the inHandle? Or mirror the new length?
+             // Usually mirroring length is good for symmetry, but might destroy the previous segment shape.
+             // Let's preserve the original inHandle length but rotate it.
+             const originalInDx = prev.inHandle.x - prev.position.x;
+             const originalInDy = prev.inHandle.y - prev.position.y;
+             const originalInLen = Math.sqrt(originalInDx*originalInDx + originalInDy*originalInDy);
+             
+             // Normalize the new direction (which is opposite to outHandle)
+             const newDirX = pdx / Math.sqrt(pdx*pdx + pdy*pdy);
+             const newDirY = pdy / Math.sqrt(pdx*pdx + pdy*pdy);
+             
+             prev.inHandle.x = prev.position.x + newDirX * originalInLen;
+             prev.inHandle.y = prev.position.y + newDirY * originalInLen;
+        }
      }
   }
 
+  // If adding in Broken mode, we shouldn't force the NEW point handles to be perfectly aligned 
+  // with the incoming tangent if we don't want to. 
+  // However, initially aligning them to the flow is usually helpful even for broken points.
+  // The User logic requested: "if broken mode, then it should just be broke, where only the second half of the previous point should be adjust"
+  
+  // My logic above does exactly that:
+  // 1. It ALWAYS adjusts prev.outHandle (the "second half of the previous point") to point to new point.
+  // 2. It ONLY adjusts prev.inHandle (the "first half") if prev is smooth.
+  // 3. The NEW point is created with aligned handles initially. Since it's 'broken', the user can immediately move them independently.
+  
   state.points.push({
     position: { x, y },
     inHandle,
     outHandle,
-    mode: 'smooth'
+    mode: state.defaultPointMode
   });
   
   // Auto-select the new point
@@ -326,6 +419,8 @@ function setupUi() {
   const modeSmooth = document.getElementById('mode-smooth');
   const pointSizeSlider = document.getElementById('point-size');
   const pointSizeValue = document.getElementById('point-size-value');
+  const defaultModeBroken = document.getElementById('default-mode-broken');
+  const defaultModeSmooth = document.getElementById('default-mode-smooth');
 
   fileInput.addEventListener('change', (event) => {
     const file = event.target.files?.[0];
@@ -364,6 +459,9 @@ function setupUi() {
   
   if (modeBroken) modeBroken.addEventListener('click', () => setPointMode('broken'));
   if (modeSmooth) modeSmooth.addEventListener('click', () => setPointMode('smooth'));
+
+  if (defaultModeBroken) defaultModeBroken.addEventListener('click', () => setDefaultPointMode('broken'));
+  if (defaultModeSmooth) defaultModeSmooth.addEventListener('click', () => setDefaultPointMode('smooth'));
 }
 
 function switchMode(mode) {
@@ -513,11 +611,20 @@ function clearCanvas() {
 
 function updatePointModeUI() {
   const container = document.getElementById('point-mode-container');
+  const newPointContainer = document.getElementById('new-point-mode-container');
+
+  // Toggle visibility of the "Next Point Mode" selector
+  // Show it when NOT selecting a specific point, OR maybe always show it? 
+  // Let's hide it when a point is selected to avoid confusion about which "mode" is being changed.
+  if (state.selected && state.selected.type === 'point') {
+      if (newPointContainer) newPointContainer.style.display = 'none';
+  } else {
+      if (newPointContainer) newPointContainer.style.display = 'block';
+  }
+  
   if (!container) return;
   
-  if (!state.selected || state.selected.type !== 'point') { // Only show for point selection? Handles imply point.
-    // Actually, if a handle is selected, we know the point. 
-    // But let's show it if anything is selected on the point.
+  if (!state.selected || state.selected.type !== 'point') { 
     if (state.selected) {
         // ok
     } else {
@@ -540,6 +647,14 @@ function updatePointModeUI() {
   if (btnSmooth) {
       btnSmooth.classList.toggle('active', mode === 'smooth');
   }
+}
+
+function setDefaultPointMode(mode) {
+    state.defaultPointMode = mode;
+    const btnBroken = document.getElementById('default-mode-broken');
+    const btnSmooth = document.getElementById('default-mode-smooth');
+    if (btnBroken) btnBroken.classList.toggle('active', mode === 'broken');
+    if (btnSmooth) btnSmooth.classList.toggle('active', mode === 'smooth');
 }
 
 function setPointMode(mode) {
